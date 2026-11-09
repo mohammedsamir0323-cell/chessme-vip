@@ -1,0 +1,24 @@
+{
+  "name": "CHESSME-12-VIP Club",
+  "short_name": "CHESSME VIP",
+  "description": "Private VIP Chess Club, Squad Bots & Live Arena",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#21201d",
+  "theme_color": "#1f1e1b",
+  "icons": [
+    {
+      "src": "https://upload.wikimedia.org/wikipedia/commons/4/42/Chess_klt45.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://upload.wikimedia.org/wikipedia/commons/f/f0/Chess_kdt45.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,14 +1,585 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>CHESSME-12-VIP | Offline</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#1f1e1b" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>CHESSME-12-VIP</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="manifest" href="manifest.json" />
   <style>
-    body { background-color: #21201d; color: #fff; text-align: center; padding-top: 20%; font-family: sans-serif; }
-    h1 { color: #81b64c; }
+    .auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 12px; }
+    .auth-tab-btn { background: #1a1917; color: #9e9b95; border: 1px solid #48453f; padding: 8px; border-radius: 6px; font-weight: 800; cursor: pointer; font-size: 12.5px; }
+    .auth-tab-btn.active { background: #81b64c; color: #fff; border-color: #81b64c; }
+    .current-session-box { background: #1a1917; border: 1px solid #3c3a36; border-radius: 8px; padding: 10px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; }
+    .board-lock-overlay { position: absolute; inset: 0; background: rgba(20, 19, 17, 0.82); backdrop-filter: blur(3px); z-index: 14; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 20px; text-align: center; }
+    .ban-screen-overlay { position: fixed; inset: 0; background: #180808; z-index: 999; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; color: #fff; }
+    .admin-notif-badge { background: #ff4757; color: #fff; border-radius: 50%; padding: 1px 6px; font-size: 10px; font-weight: 900; margin-left: 4px; }
+    .admin-section-box { background: #1a1917; border: 1px solid #3c3a36; border-radius: 8px; padding: 10px; margin-top: 8px; text-align: left; max-height: 200px; overflow-y: auto; }
+    .admin-row { display: flex; justify-content: space-between; align-items: center; background: #2b2926; padding: 8px; border-radius: 6px; margin-bottom: 6px; font-size: 12px; gap: 8px; }
+    .owner-toast { position: fixed; top: 64px; right: 16px; max-width: 360px; background: #1c251c; border: 2px solid #81b64c; color: #fff; padding: 12px 14px; border-radius: 10px; box-shadow: 0 8px 25px rgba(0,0,0,0.65); z-index: 200; font-size: 12.5px; line-height: 1.4; }
+    .clock.low-time { background: #ca3431 !important; color: #ffffff !important; animation: pulseLow 0.8s infinite alternate; }
+    @keyframes pulseLow { from { opacity: 1; } to { opacity: 0.75; } }
+    .promo-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.72); z-index: 20; display: flex; align-items: center; justify-content: center; gap: 10px; }
+    .promo-btn { width: 58px; height: 58px; background: #ebecd0; border: 3px solid #81b64c; border-radius: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    .promo-btn img { width: 85%; height: 85%; }
+    .sf-engine-line { font-family: monospace; font-size: 11px; color: #81b64c; margin-top: 4px; background: #141311; padding: 4px 6px; border-radius: 4px; }
   </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+  <script src="https://unpkg.com/mqtt@5.3.4/dist/mqtt.min.js"></script>
 </head>
 <body>
-  <h1>♟️ CHESSME-12-VIP is currently offline for a major security update.</h1>
-  <p>We are upgrading the servers. The game will return soon!</p>
+
+  <div id="banScreenOverlay" class="ban-screen-overlay hidden">
+    <div style="font-size:60px;">🚫</div>
+    <h1 style="color:#ff4757; margin:10px 0;">ACCOUNT BANNED</h1>
+    <p id="banReasonText" style="max-width:400px; color:#d1cfc9; line-height:1.5;">
+      Your account has been suspended by the Club Owner for Fair Play / Cheating violations.
+    </p>
+    <button class="ctrl-btn" id="bannedSwitchAccBtn" style="margin-top:18px; padding:8px 16px;">Switch Account</button>
+  </div>
+
+  <div id="ownerNotificationToast" class="owner-toast hidden">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+      <strong id="toastTitle">⚖️ Fair Play Update</strong>
+      <button class="close-btn" id="closeToastBtn" style="font-size:14px;">✕</button>
+    </div>
+    <p id="toastBodyText"></p>
+  </div>
+
+  <header class="top-bar">
+    <div class="brand">
+      <span class="brand-crown">♟️</span>
+      <div>
+        <h1>CHESSME <span class="vip-tag">12-VIP</span></h1>
+        <p class="online-pill" id="connectionStatus"><span class="pulse-dot"></span> Ready</p>
+      </div>
+    </div>
+    <div style="display:flex; gap:6px; align-items:center;">
+      <button class="ctrl-btn hidden" id="openAdminModalBtn" style="padding:6px 10px; border-color:#f5af19; color:#f5af19;">
+        👑 Owner <span id="adminNotifBadge" class="admin-notif-badge hidden">0</span>
+      </button>
+      <button class="ctrl-btn" id="openHistoryModalBtn" style="padding:6px 10px;">📜 Games</button>
+      <button class="ctrl-btn" id="openAccountModalBtn" style="padding:6px 10px;">👤 Account</button>
+      <button class="invite-btn" id="openOnlineModalBtn">🟢 Play Online</button>
+    </div>
+  </header>
+
+  <main class="app-container">
+
+    <section id="tab-play" class="tab-page active">
+      <div class="play-layout">
+
+        <div class="board-column">
+
+          <div class="online-status-bar" id="onlineStatusBar">
+            <span id="roomStatusText">🌐 Tap "Play Online" to challenge a friend or "Bots" to play AI</span>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <button class="ctrl-btn danger-ctrl" id="openReportModalBtn" style="padding:2px 8px; font-size:10.5px;">🚨 Report</button>
+              <span class="spectator-pill" id="spectatorCountPill">👁️ 0</span>
+            </div>
+          </div>
+
+          <div id="drawOfferBanner" class="draw-offer-banner hidden">
+            <span id="drawOfferText">🤝 Opponent offered a Draw!</span>
+            <div style="display:flex; gap:6px;">
+              <button class="action-btn" id="acceptDrawBtn" style="padding:4px 10px; font-size:11px;">Accept</button>
+              <button class="ctrl-btn danger-ctrl" id="declineDrawBtn" style="padding:4px 10px; font-size:11px;">Decline</button>
+            </div>
+          </div>
+
+          <div class="bot-coach-header" id="botCoachHeader">
+            <div class="bot-coach-avatar" id="botSpeechAvatar">🧠</div>
+            <div class="bot-speech-bubble" id="coachSpeechText">
+              وريني هتعمل إيه النهاردة! الدفاع حديد 🧱🧠
+            </div>
+          </div>
+
+          <div class="player-bar">
+            <div class="player-meta">
+              <div class="player-name-row">
+                <div class="mini-avatar" id="topAvatar">🧠</div>
+                <span class="player-name" id="topName">Mohammed Samir</span>
+                <span class="player-elo" id="topElo">(1000)</span>
+                <span class="flag-icon">🇪🇬</span>
+              </div>
+              <div class="captured-pieces" id="topCaptured"></div>
+            </div>
+            <div class="clock" id="topClock">03:00</div>
+          </div>
+
+          <div class="board-stage-row">
+            <div id="evalBarContainer" class="eval-bar-container hidden">
+              <div id="evalFillWhite" class="eval-fill-white" style="height:50%;"></div>
+              <span id="evalScoreText" class="eval-score-text">0.0</span>
+            </div>
+
+            <div class="board-wrapper">
+              <div id="chessboard" class="chessboard"></div>
+              <canvas id="arrowCanvas" class="arrow-canvas"></canvas>
+              <div id="promoOverlay" class="promo-overlay hidden"></div>
+
+              <div id="boardLockOverlay" class="board-lock-overlay hidden">
+                <div style="font-size:38px;">♟️</div>
+                <h3>Waiting for Online Opponent...</h3>
+                <p class="muted-text" style="max-width:260px;">Share your Room Code with a friend or play against Squad Bots!</p>
+                <div style="display:flex; gap:8px; margin-top:4px;">
+                  <button class="action-btn" id="overlayPlayOnlineBtn">🟢 Online Lobby</button>
+                  <button class="ctrl-btn" id="overlayPlayBotsBtn" style="padding:8px 14px;">🤖 Play Bots</button>
+                </div>
+              </div>
+
+              <div id="historyViewBanner" class="history-banner hidden">
+                ⏪ Viewing Move History — Tap ⏭️ to return to live board
+              </div>
+              <div id="emoteStage" class="emote-stage"></div>
+            </div>
+          </div>
+
+          <div class="player-bar">
+            <div class="player-meta">
+              <div class="player-name-row">
+                <div class="mini-avatar" id="bottomAvatar">😎</div>
+                <span class="player-name" id="bottomName">Player</span>
+                <span class="player-elo" id="bottomElo">(1200)</span>
+                <span class="flag-icon">🇪🇬</span>
+                <span class="move-feedback-pill hidden" id="moveQualityBadge">★ Best</span>
+              </div>
+              <div class="captured-pieces" id="bottomCaptured"></div>
+            </div>
+            <div class="clock active-clock" id="bottomClock">03:00</div>
+          </div>
+
+        </div>
+
+        <div class="sidebar-column">
+
+          <div id="reviewModeBanner" class="review-mode-banner hidden">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <strong>🔍 Real Stockfish Game Review</strong>
+              <button class="ctrl-btn" id="exitReviewModeBtn" style="padding:2px 8px; font-size:10.5px;">✕ Exit Review</button>
+            </div>
+            <p id="reviewMoveComment" class="review-comment-line">Use ◀️ ▶️ to inspect every move & best-move arrows!</p>
+            <div id="stockfishLineText" class="sf-engine-line">🤖 Stockfish 10 Ready • Green Arrow = Best Move</div>
+          </div>
+
+          <div class="moves-panel-header">Move List</div>
+          <div class="move-history-strip" id="moveHistoryStrip">
+            <span class="muted-text">Make a move on the board to start...</span>
+          </div>
+
+          <div class="nav-moves-bar">
+            <button class="ctrl-btn" id="firstMoveBtn" title="First Move">⏮️</button>
+            <button class="ctrl-btn" id="prevMoveBtn" title="Previous Move">◀️</button>
+            <button class="ctrl-btn" id="nextMoveBtn" title="Next Move">▶️</button>
+            <button class="ctrl-btn" id="lastMoveBtn" title="Live Position">⏭️</button>
+            <button class="ctrl-btn" id="flipBoardBtn" title="Flip Board">🔃 Flip</button>
+          </div>
+
+          <div class="match-controls">
+            <button class="ctrl-btn primary-ctrl" id="newOnlineBtn">➕ New</button>
+            <button class="ctrl-btn" id="offerDrawBtn">🤝 Draw</button>
+            <button class="ctrl-btn danger-ctrl" id="resignBtn">🏳️ Resign</button>
+            <button class="ctrl-btn" id="hintMoveBtn">💡 Hint</button>
+            <button class="ctrl-btn hidden" id="openReviewBtn" style="border-color:#81b64c; color:#81b64c;">📊 Review</button>
+          </div>
+
+          <div class="chat-panel">
+            <div class="chat-messages" id="chatMessagesBox">
+              <div class="chat-msg system-msg">♟️ Welcome to CHESSME-12-VIP Arena!</div>
+            </div>
+            <div class="emote-bar">
+              <button class="emote-btn" data-emote="❓">❓</button>
+              <button class="emote-btn" data-emote="⁉️">??</button>
+              <button class="emote-btn" data-emote="🤡">🤡</button>
+              <button class="emote-btn" data-emote="💀">💀</button>
+              <button class="emote-btn" data-emote="🔥">🔥</button>
+              <input type="text" id="quickChatInput" placeholder="Send a message..." class="chat-mini-input" />
+              <button class="ctrl-btn" id="sendChatBtn" style="padding:5px 10px;">Send</button>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+    <section id="tab-bots" class="tab-page">
+      <h2 class="section-title">🤖 Play vs. Bots</h2>
+      <p class="section-sub">Choose your Time Control (or Unlimited ∞), Side, and Squad Opponent!</p>
+
+      <div class="bot-setup-card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <label class="modal-label" style="margin:0;">⏱️ Bot Match Time Control</label>
+          <span id="botTimeDisplayLabel" class="badge-pill" style="background:#1c251c; color:#81b64c; font-size:11.5px;">🔥 3 min</span>
+        </div>
+
+        <div class="bot-time-grid">
+          <button class="time-btn bot-time-btn" data-btime="60">⚡ 1m</button>
+          <button class="time-btn bot-time-btn active" data-btime="180">🔥 3m</button>
+          <button class="time-btn bot-time-btn" data-btime="300">🔥 5m</button>
+          <button class="time-btn bot-time-btn" data-btime="600">⏱️ 10m</button>
+          <button class="time-btn bot-time-btn" data-btime="900">⏳ 15m</button>
+          <button class="time-btn bot-time-btn" data-btime="0">∞ No Clock</button>
+        </div>
+
+        <div class="plus-minus-row">
+          <span class="muted-text" style="font-weight:700;">Custom Minutes (+ / -):</span>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button class="pm-btn" id="botTimeMinusBtn" title="Decrease Time">−</button>
+            <strong id="botCustomMinText" style="min-width:65px; text-align:center; font-size:13px;">3 min</strong>
+            <button class="pm-btn" id="botTimePlusBtn" title="Increase Time">+</button>
+          </div>
+        </div>
+
+        <div class="plus-minus-row">
+          <span class="muted-text" style="font-weight:700;">Play As Side:</span>
+          <div style="display:flex; gap:6px;">
+            <button class="time-btn bot-side-btn active" data-bside="w" style="padding:5px 10px;">⚪ White</button>
+            <button class="time-btn bot-side-btn" data-bside="random" style="padding:5px 10px;">🎲 Random</button>
+            <button class="time-btn bot-side-btn" data-bside="b" style="padding:5px 10px;">⚫ Black</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="bot-grid" id="botList"></div>
+    </section>
+
+    <section id="tab-modes" class="tab-page">
+      <h2 class="section-title">🧩 Lichess Tactical Puzzle Trainer</h2>
+      <div class="card-box">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+          <div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <strong id="puzzleTitleText">Lichess Puzzle #1 • Queen Sacrifice</strong>
+              <span class="badge-pill" id="puzzleThemeBadge" style="background:#1c251c; color:#81b64c;">⭐ 1500 • Tactical</span>
+            </div>
+            <p class="muted-text" id="puzzleSubStatus" style="margin-top:3px;">Multi-move Lichess DB + Live Lichess API synced with Firebase!</p>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button class="ctrl-btn" id="fetchLichessPuzzleBtn" style="padding:8px 10px; border-color:#81b64c; color:#81b64c;">🌐 Live Lichess</button>
+            <button class="action-btn" onclick="loadNextPuzzle()">🧩 Next Puzzle</button>
+          </div>
+        </div>
+
+        <div class="puzzle-stats-strip">
+          <div class="puz-stat-pill">
+            <span class="muted-text">Streak</span>
+            <b id="puzzleStreakVal" style="color:#f5af19;">0 🔥</b>
+          </div>
+          <div class="puz-stat-pill">
+            <span class="muted-text">Solved (W)</span>
+            <b id="puzzleWinsVal" style="color:#81b64c;">0 ✅</b>
+          </div>
+          <div class="puz-stat-pill">
+            <span class="muted-text">Failed (L)</span>
+            <b id="puzzleLossesVal" style="color:#ff6b6b;">0 ❌</b>
+          </div>
+          <div class="puz-stat-pill">
+            <span class="muted-text">Puzzle Elo</span>
+            <b id="puzzleEloVal" style="color:#5c8bb0;">1200 ⭐</b>
+          </div>
+        </div>
+      </div>
+
+      <h2 class="section-title" style="margin-top:10px;">⚡ Custom Chess Variants</h2>
+      <div class="bot-grid">
+        <div class="bot-card">
+          <div><strong>📱 Pass & Play (2 Players)</strong><p class="muted-text">Play a friend face-to-face on one device (Unrated)</p></div>
+          <button class="action-btn" onclick="startPassAndPlay()">Play</button>
+        </div>
+        <div class="bot-card">
+          <div><strong>⛰️ King of the Hill</strong><p class="muted-text">Reach e4, d4, e5, or d5 with your King to win!</p></div>
+          <button class="action-btn" onclick="setVariant('koth')">Play</button>
+        </div>
+        <div class="bot-card">
+          <div><strong>⚡ 3-Check Mode</strong><p class="muted-text">Deliver 3 checks to win immediately!</p></div>
+          <button class="action-btn" onclick="setVariant('3check')">Play</button>
+        </div>
+        <div class="bot-card">
+          <div><strong>🚫 No-Castling Brawl</strong><p class="muted-text">Kings stay in the center — pure chaos!</p></div>
+          <button class="action-btn" onclick="setVariant('nocastle')">Play</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-ranks" class="tab-page">
+
+      <div class="tourney-card" id="tournamentCupCard">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+          <div>
+            <h2 style="font-size:17px; font-weight:900; color:#f5af19;">🏆 Friday Night Squad Cup</h2>
+            <p class="muted-text">Live Knockout Bracket • Use + / − to manage players, bracket size & match scores!</p>
+          </div>
+          <span class="badge-pill" id="tourneyStatusBadge" style="background:#3b3318; color:#f5af19; border:1px solid #f5af19;">⚡ Live Bracket</span>
+        </div>
+
+        <div class="tourney-toolbar">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span class="muted-text" style="font-weight:700;">Size:</span>
+            <button class="mini-pm-btn" id="tourneySizeMinusBtn" title="Smaller Bracket">−</button>
+            <strong id="tourneySizeLabel" style="font-size:12.5px; min-width:55px; text-align:center;">8 Slots</strong>
+            <button class="mini-pm-btn" id="tourneySizePlusBtn" title="Larger Bracket">+</button>
+          </div>
+
+          <div style="display:flex; gap:5px; flex-wrap:wrap;">
+            <button class="action-btn" id="tourneyJoinSelfBtn" style="padding:5px 10px; font-size:11.5px;">+ Join Cup</button>
+            <button class="ctrl-btn danger-ctrl" id="tourneyLeaveSelfBtn" style="padding:5px 10px; font-size:11.5px;">− Leave</button>
+            <button class="ctrl-btn" id="tourneyShuffleBtn" style="padding:5px 8px; font-size:11.5px;">🎲 Shuffle</button>
+            <button class="ctrl-btn" id="tourneyResetBtn" style="padding:5px 8px; font-size:11.5px;">🔄 Reset</button>
+          </div>
+        </div>
+
+        <div class="tourney-toolbar" style="gap:6px;">
+          <select id="tourneyAddSelect" class="text-input" style="flex:1; padding:5px 8px; font-size:12px; min-width:130px;">
+            <option value="">-- Select Club Player / Bot --</option>
+          </select>
+          <input type="text" id="tourneyCustomNameInput" placeholder="Or type player name..." class="text-input" style="flex:1; padding:5px 8px; font-size:12px; min-width:120px;" />
+          <button class="ctrl-btn primary-ctrl" id="tourneyAddPlayerBtn" style="padding:6px 12px;">+ Add to Cup</button>
+        </div>
+
+        <div id="tourneyChampionBanner" class="tourney-champion-banner hidden">
+          👑 SQUAD CUP CHAMPION: <span id="tourneyChampName" style="color:#f5af19; font-size:16px;"></span> 🏆
+        </div>
+
+        <div id="tourneyBracketContainer" class="bracket-scroller"></div>
+      </div>
+
+      <div class="season-header" style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+        <div>
+          <h2>🏆 Club Leaderboard</h2>
+          <p class="section-sub">Verified player accounts synced across the club database.</p>
+        </div>
+        <span class="badge-pill">Season 1</span>
+      </div>
+      <div class="leaderboard-list" id="leaderboardList"></div>
+    </section>
+
+    <section id="tab-settings" class="tab-page">
+      <h2 class="section-title">⚙️ Settings</h2>
+      <div class="card-box">
+        <div class="setting-row">
+          <span>Account Session</span>
+          <button class="ctrl-btn" id="switchAccountBtn" style="padding:6px 12px;">👤 Switch Account / Log Out</button>
+        </div>
+        <label class="setting-row">
+          <span>Board Theme</span>
+          <select id="boardThemeSelect">
+            <option value="classic">Chess.com Green</option>
+            <option value="icy">Icy Sea Blue</option>
+            <option value="royal">VIP Purple</option>
+            <option value="wood">Tournament Wood</option>
+          </select>
+        </label>
+        <label class="setting-row">
+          <span>Move Sounds</span>
+          <input type="checkbox" id="soundToggle" checked />
+        </label>
+      </div>
+    </section>
+
+  </main>
+
+  <div id="accountModal" class="modal hidden">
+    <div class="modal-content">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h3>👤 VIP Club Account</h3>
+        <button class="close-btn" id="closeAccountModalBtn">✕</button>
+      </div>
+
+      <div id="currentSessionBox" class="current-session-box hidden">
+        <span id="currentSessionText">Logged in</span>
+        <button class="ctrl-btn danger-ctrl" id="logoutBtn" style="padding:4px 10px;">🚪 Log Out</button>
+      </div>
+
+      <div class="auth-tabs">
+        <button class="auth-tab-btn active" id="tabBtnSignup">📝 Sign Up (New)</button>
+        <button class="auth-tab-btn" id="tabBtnLogin">🔐 Log In (Existing)</button>
+      </div>
+
+      <label class="modal-label">Email Address (Gmail / Yahoo / Outlook / iCloud)</label>
+      <input type="email" id="accEmailInput" placeholder="yourname@gmail.com" class="text-input" style="width:100%; margin-bottom:10px;" />
+
+      <div id="signupUsernameSection">
+        <label class="modal-label">Display Username</label>
+        <input type="text" id="accUsernameInput" placeholder="e.g. Kareem, Ayham, Fares" class="text-input" style="width:100%; margin-bottom:10px;" />
+      </div>
+
+      <label class="modal-label">Password</label>
+      <input type="password" id="accPinInput" maxlength="20" placeholder="Enter your password (4+ chars)" class="text-input" style="width:100%; margin-bottom:10px;" />
+
+      <div id="avatarPickerSection">
+        <label class="modal-label">Choose Your Avatar</label>
+        <div class="avatar-picker" id="avatarPicker">
+          <button class="av-choice active" data-av="😎">😎</button>
+          <button class="av-choice" data-av="🦁">🦁</button>
+          <button class="av-choice" data-av="🔥">🔥</button>
+          <button class="av-choice" data-av="👑">👑</button>
+          <button class="av-choice" data-av="🧠">🧠</button>
+          <button class="av-choice" data-av="🛡️">🛡️</button>
+          <button class="av-choice" data-av="⚡">⚡</button>
+          <button class="av-choice" data-av="🦅">🦅</button>
+        </div>
+      </div>
+
+      <p id="accErrorMsg" style="color:#ff6b6b; font-size:12px; margin:6px 0;" class="hidden"></p>
+      <button class="action-btn" id="saveAccountBtn" style="width:100%; margin-top:8px;">🚀 Enter VIP Club</button>
+    </div>
+  </div>
+
+  <div id="historyModal" class="modal hidden">
+    <div class="modal-content" style="max-width:450px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h3 id="historyModalTitle">📜 Match History</h3>
+        <button class="close-btn" id="closeHistoryModalBtn">✕</button>
+      </div>
+      <p class="muted-text" style="margin-bottom:8px;">Click "🔍 Review" on any past match to analyze it on the board with Stockfish!</p>
+      <div id="historyGamesList" class="admin-section-box" style="max-height:320px;"></div>
+    </div>
+  </div>
+
+  <div id="reportModal" class="modal hidden">
+    <div class="modal-content">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h3>🚨 Report Player to Owner</h3>
+        <button class="close-btn" id="closeReportModalBtn">✕</button>
+      </div>
+      <p class="muted-text" style="margin-bottom:10px;">Reports attach the full match PGN so the Owner can review the game on the board.</p>
+
+      <label class="modal-label">Player Username to Report</label>
+      <input type="text" id="reportTargetInput" placeholder="Opponent's username" class="text-input" style="width:100%; margin-bottom:10px;" />
+
+      <label class="modal-label">Reason</label>
+      <select id="reportReasonSelect" class="text-input" style="width:100%; margin-bottom:10px;">
+        <option value="Engine / Stockfish Cheating">🤖 Using Chess Engine / Stockfish</option>
+        <option value="Toxic Chat / Harassment">🤬 Bad Chat / Toxic Behavior</option>
+        <option value="Time Stalling / Disconnecting">⏳ Stalling / Abusing Time</option>
+        <option value="Fake / Multi-Account">👥 Fake / Multi-Account</option>
+      </select>
+
+      <label class="modal-label">Additional Details</label>
+      <input type="text" id="reportNoteInput" placeholder="e.g. Played top engine moves every turn" class="text-input" style="width:100%; margin-bottom:12px;" />
+
+      <button class="action-btn" id="submitReportBtn" style="width:100%; background:#ca3431;">🚨 Submit Report + PGN to Owner</button>
+    </div>
+  </div>
+
+  <div id="adminModal" class="modal hidden">
+    <div class="modal-content" style="max-width:520px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <h3>👑 Owner Control Center</h3>
+        <button class="close-btn" id="closeAdminModalBtn">✕</button>
+      </div>
+
+      <h4 style="text-align:left; font-size:12.5px; color:#ff6b6b; margin-top:6px;">🚨 Player Reports (Click "🔍 Review Game" to inspect PGN on board!)</h4>
+      <div id="adminReportsList" class="admin-section-box">
+        <p class="muted-text">No reports submitted yet.</p>
+      </div>
+
+      <h4 style="text-align:left; font-size:12.5px; color:#81b64c; margin-top:10px;">👥 All Accounts (Full Emails, Games History, Ban & Delete)</h4>
+      <div id="adminAccountsList" class="admin-section-box"></div>
+    </div>
+  </div>
+
+  <div id="onlineModal" class="modal hidden">
+    <div class="modal-content">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h3>🟢 Online Multiplayer Lobby</h3>
+        <button class="close-btn" id="closeOnlineModalBtn">✕</button>
+      </div>
+
+      <label class="modal-label">Time Control</label>
+      <div class="time-grid" style="grid-template-columns: repeat(5, 1fr);">
+        <button class="time-btn" data-time="60">⚡ 1m</button>
+        <button class="time-btn active" data-time="180">🔥 3m</button>
+        <button class="time-btn" data-time="300">🔥 5m</button>
+        <button class="time-btn" data-time="600">⏱️ 10m</button>
+        <button class="time-btn" data-time="0">∞ Unlim</button>
+      </div>
+
+      <div class="online-box">
+        <button class="action-btn" id="createRoomBtn" style="width:100%;">➕ Create Online Room (White)</button>
+        <div id="createdRoomInfo" class="hidden" style="margin-top:10px;">
+          <p class="muted-text">Room Created! Waiting for friend to join...</p>
+          <div class="room-code-display" id="generatedRoomCode">----</div>
+          <button class="ctrl-btn" id="copyRoomLinkBtn" style="width:100%; margin-top:6px;">📲 Copy WhatsApp Invite Link</button>
+        </div>
+      </div>
+
+      <div id="liveRoomsSection" style="margin-top:10px; text-align:left;">
+        <label class="modal-label">🟢 Live Open Rooms (Click to Join)</label>
+        <div id="liveRoomsList" class="live-rooms-list">
+          <p class="muted-text" style="text-align:center; padding:6px;">No open rooms yet — create one above or enter code below!</p>
+        </div>
+      </div>
+
+      <div style="margin: 8px 0; color:#9e9b95; font-size:11px;">— OR ENTER ROOM CODE —</div>
+
+      <div class="online-box">
+        <input type="text" id="joinRoomInput" placeholder="4-Digit Room Code (e.g. 4821)" class="text-input" style="width:100%; margin-bottom:8px; text-align:center; font-size:15px; font-weight:700;" />
+        <div style="display:flex; gap:8px;">
+          <button class="action-btn" id="joinAsPlayerBtn" style="flex:1;">⚔️ Join & Play</button>
+          <button class="ctrl-btn" id="joinAsSpectatorBtn" style="flex:1;">👁️ Spectate</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="gameOverModal" class="modal hidden">
+    <div class="modal-content">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div style="width:24px;"></div>
+        <h2 id="modalTitle">Game Over!</h2>
+        <button class="close-btn" id="closeGameOverModalBtn">✕</button>
+      </div>
+      <p id="modalSubtitle" style="color:#81b64c; font-weight:700; margin-top:2px;">Match Concluded</p>
+
+      <div class="review-stats-box">
+        <div class="accuracy-dual-row">
+          <div class="acc-box">
+            <span class="muted-text" id="revWhiteName">White</span>
+            <strong id="revWhiteAcc" class="acc-score-pill">100%</strong>
+          </div>
+          <div class="acc-vs">ACCURACY</div>
+          <div class="acc-box">
+            <span class="muted-text" id="revBlackName">Black</span>
+            <strong id="revBlackAcc" class="acc-score-pill">—</strong>
+          </div>
+        </div>
+
+        <div class="review-badges-grid">
+          <div class="rev-item"><span class="rev-dot" style="background:#1baca6;">!!</span> <b id="revBrilliant">0</b> Brilliant</div>
+          <div class="rev-item"><span class="rev-dot" style="background:#5c8bb0;">!</span> <b id="revGreat">0</b> Great</div>
+          <div class="rev-item"><span class="rev-dot" style="background:#81b64c;">★</span> <b id="revBest">0</b> Best/Book</div>
+          <div class="rev-item"><span class="rev-dot" style="background:#f7c631; color:#111;">?!</span> <b id="revInacc">0</b> Inaccuracy</div>
+          <div class="rev-item"><span class="rev-dot" style="background:#e69f00;">?</span> <b id="revMistake">0</b> Mistake</div>
+          <div class="rev-item"><span class="rev-dot" style="background:#ca3431;">??</span> <b id="revBlunder">0</b> Blunder</div>
+        </div>
+        <div id="worstBlunderReport" class="worst-blunder-line"></div>
+      </div>
+
+      <div class="roast-box" id="roastBoxContainer">
+        <h4 id="roastAuthor">Match Summary</h4>
+        <p id="roastText" style="margin-top:4px; font-weight:700;"></p>
+      </div>
+
+      <div style="display:flex; gap:8px;">
+        <button class="ctrl-btn" id="stepReviewBoardBtn" style="flex:1; padding:10px;">🔍 Review Moves on Board</button>
+        <button class="action-btn" id="playAgainBtn" style="flex:1; padding:10px;">🔄 Play Again</button>
+      </div>
+    </div>
+  </div>
+
+  <nav class="bottom-nav">
+    <button class="nav-item active" data-target="tab-play"><span class="nav-icon">♟️</span><span class="nav-label">Play</span></button>
+    <button class="nav-item" data-target="tab-bots"><span class="nav-icon">🤖</span><span class="nav-label">Bots</span></button>
+    <button class="nav-item" data-target="tab-modes"><span class="nav-icon">⚡</span><span class="nav-label">Modes</span></button>
+    <button class="nav-item" data-target="tab-ranks"><span class="nav-icon">🏆</span><span class="nav-label">League</span></button>
+    <button class="nav-item" data-target="tab-settings"><span class="nav-icon">⚙️</span><span class="nav-label">Settings</span></button>
+  </nav>
+
+  <script type="module" src="app.js"></script>
 </body>
 </html>
